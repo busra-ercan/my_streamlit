@@ -152,14 +152,14 @@ if st.button("💡 Tahmini Fiyat", use_container_width=True):
                 lo, hi = qi
                 # orta tahmini kuantil bandına projekte et (garanti içeride kalsın)
                 mid_adj = float(np.clip(mid, lo, hi))
-                st.warning(f"Aracların Yuzde kacı bu degerin altında (≈%80): **£{lo:,.0f} – £{hi:,.0f}**")
+                #st.warning(f"Aracların Yuzde kacı bu degerin altında (≈%80): **£{lo:,.0f} – £{hi:,.0f}**")
                 if abs(mid_adj - mid) > 1e-6:
                     st.caption(f"Not: Beklenen sonuç, en olumsuz ve en iyimser senaryolar arasında kalan güven aralığına yerleştirildi.: £{mid:,.0f} → £{mid_adj:,.0f}")
                     mid = mid_adj
 
             # Mini özet tablo
             df_out = pd.DataFrame({
-                "Metrik": ["Tahmin", "MAE Alt", "MAE Üst"],
+                "Metrik": ["Önerilen Fiyat Tahmini", "Olası En düşük Değer", "Olası En Yüksek Değer"],
                 "£": [round(mid), round(lower_mae), round(upper_mae)]
             })
             st.dataframe(df_out, use_container_width=True)
@@ -224,8 +224,8 @@ with tab_engine:
 st.markdown(
     """
     **Açıklama**  
-    - Orta tahmin modeli: `log_price` hedefi ile eğitildi; tahminden sonra `expm1` ile £ uzayına dönüştürülür.  
-    - MAE bandı: test kümesi ortalama mutlak hatasına göre pratik aralık.  
-    - Kuantil aralığı: LightGBM `objective="quantile"` (ör. α=0.10/0.90) ile doğrudan £ hedefinde tahmin.  
+    -Beklenen fiyat, geçmiş verilerden öğrenilen ortalama davranışı temsil eder.
+    -Alt ve üst değerler, fiyatın makul şekilde sapabileceği sınırları gösterir.
+    -Tahminler, Birleşik Krallık’ta 1980–2023 yılları arasında trafiğe çıkan araçlardan elde edilen geçmiş verilere dayanmaktadır. 
     """
 )
