@@ -1,10 +1,5 @@
 
 # streamlit_app.py
-# Çalıştır (lokalde): streamlit run streamlit_app.py
-# Aynı klasörde şunlar olmalı:
-#   - /kaggle/working/best_lightgbm_optuna.joblib   (orta tahmin boru hattı: preprocessor + LightGBM-log)
-#   - (opsiyonel) /kaggle/working/pipe_q10.joblib   (LightGBM quantile alpha=0.10, GBP hedefi)
-#   - (opsiyonel) /kaggle/working/pipe_q90.joblib   (LightGBM quantile alpha=0.90, GBP hedefi)
 
 import os
 import numpy as np
@@ -89,9 +84,10 @@ st.title("🚗 Araç Fiyat Tahmini (LightGBM)")
 
 with st.sidebar:
     st.header("⚙️ Modeller")
-    mid_path = st.text_input("Orta (log->£) boru hattı", value="/kaggle/working/best_lightgbm_optuna.joblib")
-    q10_path = st.text_input("Alt kuantil (opsiyonel)", value="/kaggle/working/pipe_q10.joblib")
-    q90_path = st.text_input("Üst kuantil (opsiyonel)", value="/kaggle/working/pipe_q90.joblib")
+    mid_path = st.text_input("Orta (log->£) boru hattı",value="best_lightgbm_optuna.joblib")
+
+    q10_path = st.text_input("Alt kuantil (opsiyonel)", value="pipe_q10.joblib")
+    q90_path = st.text_input("Üst kuantil (opsiyonel)", value="pipe_q90.joblib")
 
     if st.button("Modelleri Yükle"):
         try:
@@ -105,7 +101,7 @@ with st.sidebar:
 # İlk açılışta orta modeli otomatik dene
 if "pipe_mid" not in st.session_state:
     try:
-        st.session_state["pipe_mid"] = load_pipe("/kaggle/working/best_lightgbm_optuna.joblib")
+        st.session_state["pipe_mid"] = load_pipe("best_lightgbm_optuna.joblib")
     except Exception as e:
         st.warning(str(e))
 
