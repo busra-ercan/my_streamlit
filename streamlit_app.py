@@ -80,14 +80,14 @@ def predict_interval(pipe_lo, pipe_hi, X_one: pd.DataFrame):
 
 # ========= UI =========
 st.set_page_config(page_title="Araç Fiyat Tahmini", page_icon="🚗", layout="centered")
-st.title("🚗 Araç Fiyat Tahmini (LightGBM)")
+st.title("🚗 Araç Fiyat Tahmini")
 
 with st.sidebar:
     st.header("⚙️ Modeller")
     mid_path = st.text_input("Orta (log->£) boru hattı",value="best_lightgbm_optuna.joblib")
 
-    q10_path = st.text_input("Alt kuantil (opsiyonel)", value="pipe_q10.joblib")
-    q90_path = st.text_input("Üst kuantil (opsiyonel)", value="pipe_q90.joblib")
+    q10_path = st.text_input("Alt Limit (opsiyonel)", value="pipe_q10.joblib")
+    q90_path = st.text_input("Üst Limit (opsiyonel)", value="pipe_q90.joblib")
 
     if st.button("Modelleri Yükle"):
         try:
@@ -144,7 +144,7 @@ if st.button("💡 Tahmini Fiyat", use_container_width=True):
             mae_band = k * GLOBAL_MAE_GBP
             lower_mae = max(0.0, mid - mae_band)
             upper_mae = mid + mae_band
-            st.info(f"MAE bandı: **£{lower_mae:,.0f} – £{upper_mae:,.0f}** (±£{mae_band:,.0f})")
+            st.info(f"Fiyat Aralıgı: **£{lower_mae:,.0f} – £{upper_mae:,.0f}** (±£{mae_band:,.0f})")
 
             # Kuantil aralığı (varsa)
             qi = predict_interval(pipe_q10, pipe_q90, X_one)
@@ -152,9 +152,9 @@ if st.button("💡 Tahmini Fiyat", use_container_width=True):
                 lo, hi = qi
                 # orta tahmini kuantil bandına projekte et (garanti içeride kalsın)
                 mid_adj = float(np.clip(mid, lo, hi))
-                st.warning(f"Kuantil aralığı (≈%80): **£{lo:,.0f} – £{hi:,.0f}**")
+                st.warning(f"Aracların Yuzde kacı bu degerin altında (≈%80): **£{lo:,.0f} – £{hi:,.0f}**")
                 if abs(mid_adj - mid) > 1e-6:
-                    st.caption(f"Not: Orta tahmin kuantil bandına projekte edildi: £{mid:,.0f} → £{mid_adj:,.0f}")
+                    st.caption(f"Not: Beklenen sonuç, en olumsuz ve en iyimser senaryolar arasında kalan güven aralığına yerleştirildi.: £{mid:,.0f} → £{mid_adj:,.0f}")
                     mid = mid_adj
 
             # Mini özet tablo
