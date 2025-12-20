@@ -1,10 +1,11 @@
 # file: streamlit_app.py
 import os
+from typing import Optional, Tuple, List
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 from joblib import load
-from typing import Optional, Tuple
 
 # ===================== Constants =====================
 CURRENT_YEAR = 2025
@@ -14,11 +15,20 @@ NUM_COLS = [
 ]
 CAT_COLS = ["transmission","fuelType"]
 ALL_X_COLS = NUM_COLS + CAT_COLS
-GLOBAL_MAE_GBP = 1740.0  # Practical MAE band
+GLOBAL_MAE_GBP = 1740.0  # practical MAE band
 
-REQUIRED_BASE = {"year", "mileage"}
-BRAND_ALIASES = ["brand", "make", "manufacturer"]
-MODEL_ALIASES = ["model", "model_name", "series"]
+# Brand inference dictionary (expandable)
+BRAND_KEYWORDS = {
+    "audi":      [" audi", "a1", "a3", "a4", "a5", "a6", "q2", "q3", "q5", "tt"],
+    "bmw":       [" bmw", "1 series", "2 series", "3 series", "4 series", "5 series", "x1", "x3", "x5"],
+    "mercedes":  [" mercedes", " merc ", "c class", "e class", "a class", "b class", "cla", "gla", "glc", "c-class", "e-class", "a-class"],
+    "ford":      [" ford", "fiesta", "focus", "mondeo", "kuga", "ecosport", "puma", "ka "],
+    "hyundai":   [" hyundai", " hyundi", "i10", "i20", "i30", "elantra", "tucson", "kona", "santa fe", "santafe"],
+    "skoda":     [" skoda", "octavia", "fabia", "superb", "kodiaq", "karoq", "scala", "rapid"],
+    "toyota":    [" toyota", "yaris", "corolla", "auris", "rav4", "c-hr", "chr", "aygo"],
+    "vauxhall":  [" vauxhall", "astra", "corsa", "insignia", "mokka", "zafira", "vivaro"],
+    "vw":        [" vw", "volkswagen", "golf", "polo", "passat", "tiguan", "touran", "touareg", "up "],
+}
 
 # ===================== Page =====================
 st.set_page_config(page_title="Car Price Estimator", page_icon="🚗", layout="centered")
@@ -30,35 +40,67 @@ def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [c.strip().lower() for c in df.columns]
     return df
 
-def auto_map_brand_model(df: pd.DataFrame) -> pd.DataFrame:
-    """Why: unify heterogeneous column names to 'brand' and 'model' for reliable UI."""
+def tidy_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Why: align user CSV to model schema (case & alias fixes)."""
     df = normalize_cols(df)
-    if "brand" not in df.columns:
-        for c in ("make","manufacturer"):
-            if c in df.columns:
-                df.rename(columns={c: "brand"}, inplace=True)
-                break
-    if "model" not in df.columns:
-        for c in ("model_name","series"):
-            if c in df.columns:
-                df.rename(columns={c: "model"}, inplace=True)
-                break
+    # enginesize → engineSize
+    if "enginesize" in df.columns and "enginesize" != "engineSize":
+        df.rename(columns={"enginesize": "engineSize"}, inplace=True)
+    # fueltype → fuelType
+    if "fueltype" in df.columns and "fuelType" not in df.columns:
+        df.rename(columns={"fueltype": "fuelType"}, inplace=True)
+    # tax(£) → tax if tax missing/mostly null
+    if "tax(£)" in df.columns:
+        if "tax" not in df.columns or df["tax"].isna().sum() >= df["tax"].shape[0] - 5:
+            df.rename(columns={"tax(£)": "tax"}, inplace=True)
+    # model alias fixes
+    for alias in ("model_name", "series", "variant"):
+        if alias in df.columns and "model" not in df.columns:
+            df.rename(columns={alias: "model"}, inplace=True)
+    # manufacturer/make → brand
+    for alias in ("brand", "make", "manufacturer", "brand_name"):
+        if alias in df.columns:
+            df.rename(columns={alias: "brand"}, inplace=True)
+            break
     return df
 
-def detect_brand_model_cols(df: pd.DataFrame) -> Tuple[Optional[str], Optional[str]]:
-    cols = set(df.columns)
-    brand_col = next((c for c in BRAND_ALIASES if c in cols), None)
-    model_col = next((c for c in MODEL_ALIASES if c in cols), None)
-    return brand_col, model_col
+def infer_brand_from_model(df: pd.DataFrame) -> pd.DataFrame:
+    """Why: your CSV lacks 'brand'; infer from 'model' tokens robustly."""
+    df = df.copy()
+    if "brand" not in df.columns:
+        df["brand"] = np.nan
+
+    if "model" not in df.columns:
+        return df  # UI will stop later
+
+    def detect(m: str) -> Optional[str]:
+        if not isinstance(m, str):
+            return None
+        t = " " + m.lower().replace("-", " ") + " "
+        for brand, kws in BRAND_KEYWORDS.items():
+            for kw in kws:
+                if kw in t:
+                    return brand
+        return None
+
+    mask = df["brand"].isna() | (df["brand"].astype(str).str.strip() == "") | (df["brand"].astype(str).str.lower() == "nan")
+    df.loc[mask, "brand"] = df.loc[mask, "model"].map(detect)
+    df["brand"] = df["brand"].astype(object)
+    return df
 
 @st.cache_data(show_spinner=False)
 def load_dataset(uploaded_file=None, path: Optional[str]=None) -> Optional[pd.DataFrame]:
     try:
         if uploaded_file is not None:
-            return auto_map_brand_model(pd.read_csv(uploaded_file))
-        if path and os.path.exists(path):
-            return auto_map_brand_model(pd.read_csv(path))
-        return None
+            df = pd.read_csv(uploaded_file)
+        elif path and os.path.exists(path):
+            df = pd.read_csv(path)
+        else:
+            return None
+        df = tidy_column_names(df)
+        if "brand" not in df.columns:
+            df = infer_brand_from_model(df)
+        return df
     except Exception as exc:
         st.warning(f"Dataset load failed: {exc}")
         return None
@@ -69,13 +111,14 @@ def load_pipe(path: str):
         raise FileNotFoundError(f"Model not found: {path}")
     return load(path)
 
+# ===================== FE & Predict =====================
 def fe_transform_single(
     year: int, mileage: float, engine_size: float,
     transmission: str, fuel_type: str,
     mpg: Optional[float]=None, tax: Optional[float]=None,
     model_name: Optional[str]=None
 ) -> pd.DataFrame:
-    """Why: features must mirror training for valid inference."""
+    """Why: features must match training exactly for valid inference."""
     df = pd.DataFrame([{
         "year": year, "mileage": mileage, "engineSize": engine_size,
         "transmission": transmission, "fuelType": fuel_type,
@@ -108,29 +151,29 @@ def predict_interval(pipe_lo, pipe_hi, X_one: pd.DataFrame):
     return (lo, hi) if lo <= hi else (hi, lo)
 
 def suggest_mileage_range(df: Optional[pd.DataFrame], brand: Optional[str], model: Optional[str], sel_year: int) -> Tuple[int,int]:
-    """Why: make KM chart realistic using km/year distribution from chosen slice."""
+    """Why: KM chart defaults should be realistic for the chosen slice."""
     fallback = (20_000, 120_000)
     if df is None or "mileage" not in df.columns or "year" not in df.columns:
         return fallback
     tmp = df.copy()
-    tmp = tmp[(pd.to_numeric(tmp["year"], errors="coerce") >= 1980) & (pd.to_numeric(tmp["year"], errors="coerce") <= CURRENT_YEAR)]
-    tmp["vehicle_age"] = CURRENT_YEAR - pd.to_numeric(tmp["year"], errors="coerce")
+    tmp["year"] = pd.to_numeric(tmp["year"], errors="coerce")
+    tmp["mileage"] = pd.to_numeric(tmp["mileage"], errors="coerce")
+    tmp = tmp[(tmp["year"] >= 1980) & (tmp["year"] <= CURRENT_YEAR)]
+    tmp["vehicle_age"] = CURRENT_YEAR - tmp["year"]
     tmp = tmp[tmp["vehicle_age"] >= 0]
     denom = (tmp["vehicle_age"] + 1).replace(0, 1)
-    tmp["km_per_year_calc"] = pd.to_numeric(tmp["mileage"], errors="coerce") / denom
+    tmp["km_per_year_calc"] = tmp["mileage"] / denom
 
-    brand_col, model_col = detect_brand_model_cols(tmp)
-    if brand and brand_col and brand_col in tmp.columns:
-        tmp = tmp[tmp[brand_col].astype(str) == str(brand)]
-    if model and model_col and model_col in tmp.columns:
-        tmp = tmp[tmp[model_col].astype(str) == str(model)]
+    if brand and "brand" in tmp.columns:
+        tmp = tmp[tmp["brand"].astype(str).str.lower() == str(brand).lower()]
+    if model and "model" in tmp.columns:
+        tmp = tmp[tmp["model"].astype(str) == str(model)]
 
     valid = tmp["km_per_year_calc"].replace([np.inf, -np.inf], np.nan).dropna()
     if valid.shape[0] < 10:
         return fallback
 
-    q10 = float(valid.quantile(0.10))
-    q90 = float(valid.quantile(0.90))
+    q10 = float(valid.quantile(0.10)); q90 = float(valid.quantile(0.90))
     if not np.isfinite(q10) or not np.isfinite(q90) or q10 <= 0 or q90 <= 0:
         return fallback
 
@@ -167,7 +210,7 @@ with st.sidebar:
 
     st.divider()
     st.header("📂 Dataset (required)")
-    st.caption("Upload a single merged CSV that includes: year, mileage, and brand + model columns.")
+    st.caption("Upload a merged CSV. Required columns: model, year, mileage. Brand will be inferred if missing.")
     up = st.file_uploader("Upload CSV", type=["csv"])
     ds_path = st.text_input("...or local CSV path (optional)", value="")
     d1, d2 = st.columns(2)
@@ -175,14 +218,21 @@ with st.sidebar:
         df_loaded = load_dataset(uploaded_file=up, path=ds_path)
         if df_loaded is not None:
             st.session_state["df"] = df_loaded
-            st.success(f"Dataset loaded: {len(df_loaded):,} rows.")
+            # feedback
+            has_brand = "brand" in df_loaded.columns
+            unk = int(df_loaded["brand"].isna().sum()) if has_brand else -1
+            if has_brand and unk == 0:
+                st.success(f"Dataset loaded: {len(df_loaded):,} rows. Detected ✓ brand/model/year/mileage")
+            elif has_brand and unk > 0:
+                st.warning(f"Dataset loaded: {len(df_loaded):,} rows. Inferred 'brand' for most rows; {unk:,} unknown.")
+            else:
+                st.error("Could not infer 'brand'. Update BRAND_KEYWORDS or add a brand column.")
         else:
-            st.error("Failed to load dataset. Check file/path.")
+            st.error("Failed to load dataset.")
     if d2.button("Clear Dataset", use_container_width=True):
-        st.session_state.pop("df", None)
-        st.info("Dataset cleared.")
+        st.session_state.pop("df", None); st.info("Dataset cleared.")
 
-# Try autoload mid model once (optional)
+# Try autoload mid model (optional)
 if "pipe_mid" not in st.session_state:
     try:
         st.session_state["pipe_mid"] = load_pipe("best_lightgbm_optuna.joblib")
@@ -196,27 +246,34 @@ df_global = st.session_state.get("df")
 
 # ===================== Require dataset & columns =====================
 if not isinstance(df_global, pd.DataFrame):
-    st.error("Please load a dataset to continue. Brand/Model must come from your dataset.")
-    st.stop()
+    st.error("Please load a dataset to continue."); st.stop()
 
-df_global = auto_map_brand_model(df_global)
-missing = [c for c in ("brand","model","year","mileage") if c not in df_global.columns]
+df_global = tidy_column_names(df_global)
+if "brand" not in df_global.columns:
+    df_global = infer_brand_from_model(df_global)
+
+required_now = ["brand","model","year","mileage"]
+missing = [c for c in required_now if c not in df_global.columns]
 if missing:
-    st.error(f"Missing required columns: {missing}. Please fix your CSV or mapping.")
-    st.stop()
+    st.error(f"Missing required columns after mapping: {missing}."); st.stop()
+
+# Drop rows with unknown brand for clean UI
+df_sel = df_global.dropna(subset=["brand","model"]).copy()
+df_sel["brand"] = df_sel["brand"].astype(str).str.strip()
+df_sel["model"] = df_sel["model"].astype(str).str.strip()
 
 # ===================== Inputs (English) =====================
 st.subheader("📝 Inputs")
 st.markdown("**Vehicle Identification**")
 
-brands = sorted(df_global["brand"].dropna().astype(str).unique().tolist())
+brands = sorted([b for b in df_sel["brand"].unique().tolist() if b and b.lower() != "nan"])
 if not brands:
-    st.error("No brands found in the dataset."); st.stop()
+    st.error("No brands determined. Update BRAND_KEYWORDS or add 'brand' to CSV."); st.stop()
 brand_val = st.selectbox("Brand", options=brands, index=0, key="brand_sel")
 
 models = (
-    df_global.loc[df_global["brand"].astype(str) == str(brand_val), "model"]
-    .dropna().astype(str).unique().tolist()
+    df_sel.loc[df_sel["brand"] == brand_val, "model"]
+    .dropna().astype(str).str.strip().unique().tolist()
 )
 models = sorted(models)
 if not models:
@@ -238,7 +295,7 @@ mpg_val = None if mpg_opt == 0.0 else mpg_opt
 tax_val = None if tax_opt == 0.0 else tax_opt
 
 # Suggested KM window + OOD notice
-suggested_km = suggest_mileage_range(df_global, brand_val, model_name, year)
+suggested_km = suggest_mileage_range(df_sel, brand_val, model_name, year)
 ood_warning_for_mileage(mileage, suggested_km)
 
 # ===================== Predict =====================
@@ -259,14 +316,12 @@ if st.button("💡 Predict Price", use_container_width=True):
             qi = predict_interval(pipe_q10, pipe_q90, X_one)
             if qi is not None:
                 lo, hi = qi
-                mid_adj = float(np.clip(mid, lo, hi))  # keep inside quantile band
+                mid_adj = float(np.clip(mid, lo, hi))
                 if abs(mid_adj - mid) > 1e-6:
                     st.caption(f"Adjusted to stay within quantile band: £{mid:,.0f} → £{mid_adj:,.0f}")
 
-            df_out = pd.DataFrame({
-                "Metric": ["Recommended Estimate", "Likely Lower Bound", "Likely Upper Bound"],
-                "£": [round(mid), round(lower_mae), round(upper_mae)]
-            })
+            df_out = pd.DataFrame({"Metric":["Recommended Estimate","Likely Lower Bound","Likely Upper Bound"],
+                                   "£":[round(mid), round(lower_mae), round(upper_mae)]})
             st.dataframe(df_out, use_container_width=True)
         except Exception as e:
             st.error(f"Prediction error: {e}")
@@ -317,6 +372,8 @@ st.markdown(
     """
 **Notes**
 - The estimate reflects average behavior learned from historical data.
+- Bounds show plausible variation around the estimate.
+- *MPG = Miles per gallon.*
 - Based on historical data from vehicles registered in the United Kingdom between 2000 and 2020.
 """
 )
