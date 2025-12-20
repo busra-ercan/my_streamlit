@@ -373,8 +373,7 @@ st.markdown(
     """
 **Notes**
 - The estimate reflects average behavior learned from historical data.
-- Bounds show plausible variation around the estimate.
-- *MPG = Miles per gallon.*
+
 - Based on historical data from vehicles registered in the United Kingdom between 2000 and 2020.
 """
 )
