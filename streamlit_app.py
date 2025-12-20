@@ -1,11 +1,48 @@
-# file: streamlit_app.py  (Tax input removed; rest unchanged/çalışır)
+# file: streamlit_app.py
+# Streamlit app with: persistent dataset (disk), Brand→Model→Engine chain, no Tax input,
+# MPG label clarified, KM chart data-driven, and optional dark CSS tweaks.
+
 import os
 from typing import Optional, Tuple, List
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 from joblib import load
 
+# =============== Page & (optional) dark CSS tweaks ===============
+st.set_page_config(page_title="Car Price Estimator", page_icon="🚗", layout="centered")
+DARK_CSS = """
+<style>
+[data-testid="stAppViewContainer"]{background:#0b1220;}
+[data-testid="stSidebar"]{background:#111827;}
+.block-container{padding-top:1.2rem;}
+.stTabs [data-baseweb="tab-list"]{border-bottom:1px solid rgba(255,255,255,.08);}
+</style>
+"""
+st.markdown(DARK_CSS, unsafe_allow_html=True)
+
+# =============== PERSISTENCE (➊ Import’lardan hemen sonra burası) ===============
+PERSIST_PATH = "last_dataset.pkl"
+
+def persist_set_df(df: pd.DataFrame):
+    """Why: Keep dataset across reruns/reloads."""
+    st.session_state["df"] = df
+    try:
+        df.to_pickle(PERSIST_PATH)
+    except Exception as e:
+        st.warning(f"Could not persist dataset: {e}")
+
+def persist_clear_df():
+    """Why: Clear from memory AND disk."""
+    st.session_state.pop("df", None)
+    try:
+        if os.path.exists(PERSIST_PATH):
+            os.remove(PERSIST_PATH)
+    except Exception as e:
+        st.warning(f"Could not remove persisted dataset: {e}")
+
+# =============== Constants & brand inference keywords ===============
 CURRENT_YEAR = 2025
 NUM_COLS = [
     "CAE","log_mileage","km_per_year","engineSize","mpg","tax",
@@ -27,11 +64,11 @@ BRAND_KEYWORDS = {
     "vw": [" vw","volkswagen","golf","polo","passat","tiguan","touran","touareg","up "],
 }
 
-st.set_page_config(page_title="Car Price Estimator", page_icon="🚗", layout="centered")
-st.title("🚗 Car Price Estimator")
-
+# =============== Utils (normalize, alias fix, brand infer) ===============
 def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy(); df.columns = [c.strip().lower() for c in df.columns]; return df
+    df = df.copy()
+    df.columns = [c.strip().lower() for c in df.columns]
+    return df
 
 def tidy_column_names(df: pd.DataFrame) -> pd.DataFrame:
     df = normalize_cols(df)
@@ -80,11 +117,12 @@ def load_pipe(path: str):
     if not os.path.exists(path): raise FileNotFoundError(f"Model not found: {path}")
     return load(path)
 
+# =============== FE & predict ===============
 def fe_transform_single(year:int, mileage:float, engine_size:float,
                         transmission:str, fuel_type:str,
                         mpg:Optional[float]=None, tax:Optional[float]=None,
                         model_name:Optional[str]=None) -> pd.DataFrame:
-    # Why: features must match training; NaN allowed for optional ones (imputer)
+    # Why: match training features exactly; NaN ok (imputer handles)
     df = pd.DataFrame([{
         "year":year, "mileage":mileage, "engineSize":engine_size,
         "transmission":transmission, "fuelType":fuel_type,
@@ -140,6 +178,16 @@ def ood_warning_for_mileage(sel_mileage: float, suggested: Tuple[int,int]):
     if sel_mileage < lo-margin or sel_mileage > hi+margin:
         st.warning("Mileage seems outside the typical range for this brand/model/year. Predictions may be less reliable.")
 
+# =============== ➋ App açılışında otomatik geri yükleme ===============
+if "df" not in st.session_state:
+    if os.path.exists(PERSIST_PATH):
+        try:
+            st.session_state["df"] = pd.read_pickle(PERSIST_PATH)
+            st.sidebar.success("Restored last dataset from disk.")
+        except Exception as e:
+            st.sidebar.warning(f"Restore failed: {e}")
+
+# =============== Sidebar: Pipelines ===============
 with st.sidebar:
     st.header("⚙️ Pipelines")
     mid_path = st.text_input("Mid (log→£) pipeline", value="best_lightgbm_optuna.joblib")
@@ -158,29 +206,42 @@ with st.sidebar:
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
+# =============== ➌ Sidebar: Dataset loader (ESKİ bloğu bununla değiştir) ===============
+with st.sidebar:
     st.divider()
     st.header("📂 Dataset (required)")
     st.caption("Upload merged CSV (must contain: model, year, mileage, engineSize). Brand will be inferred if missing.")
-    up = st.file_uploader("Upload CSV", type=["csv"])
-    ds_path = st.text_input("...or local CSV path (optional)", value="")
+    up = st.file_uploader("Upload CSV", type=["csv"], key="uploader_csv")
+    ds_path = st.text_input("...or local CSV path (optional)", value="", key="local_path_csv")
     d1,d2 = st.columns(2)
-    if d1.button("Load Dataset", use_container_width=True):
-        df_loaded = load_dataset(uploaded_file=up, path=ds_path)
-        if df_loaded is not None:
-            st.session_state["df"] = df_loaded
-            has_brand = "brand" in df_loaded.columns
-            unk = int(df_loaded["brand"].isna().sum()) if has_brand else -1
-            if has_brand and unk == 0:
-                st.success(f"Dataset loaded: {len(df_loaded):,} rows. Detected ✓ brand/model/year/mileage/engineSize")
-            elif has_brand and unk > 0:
-                st.warning(f"Dataset loaded: {len(df_loaded):,} rows. Inferred 'brand' for most rows; {unk:,} unknown.")
+    if d1.button("Load Dataset", use_container_width=True, key="btn_load_dataset"):
+        try:
+            if up is not None:
+                df_loaded = pd.read_csv(up)
+            elif ds_path.strip():
+                if not os.path.exists(ds_path):
+                    st.error("Local path not found."); df_loaded = None
+                else:
+                    df_loaded = pd.read_csv(ds_path)
             else:
-                st.error("Could not infer 'brand'. Update BRAND_KEYWORDS or add a brand column.")
-        else:
-            st.error("Failed to load dataset.")
-    if d2.button("Clear Dataset", use_container_width=True):
-        st.session_state.pop("df", None); st.info("Dataset cleared.")
+                df_loaded = None
 
+            if df_loaded is None:
+                st.error("No file selected or invalid path.")
+            else:
+                df_loaded = tidy_column_names(df_loaded)
+                if "brand" not in df_loaded.columns:
+                    df_loaded = infer_brand_from_model(df_loaded)
+                persist_set_df(df_loaded)
+                st.success(f"Dataset loaded & persisted: {len(df_loaded):,} rows.")
+        except Exception as e:
+            st.error(f"Dataset load failed: {e}")
+
+    if d2.button("Clear Dataset", use_container_width=True, key="btn_clear_dataset"):
+        persist_clear_df()
+        st.info("Dataset cleared from memory and disk.")
+
+# =============== Autoload model once (optional) ===============
 if "pipe_mid" not in st.session_state:
     try:
         st.session_state["pipe_mid"] = load_pipe("best_lightgbm_optuna.joblib")
@@ -190,24 +251,29 @@ if "pipe_mid" not in st.session_state:
 pipe_mid = st.session_state.get("pipe_mid")
 pipe_q10 = st.session_state.get("pipe_q10")
 pipe_q90 = st.session_state.get("pipe_q90")
-df_global = st.session_state.get("df")
 
+# =============== Require dataset ===============
+df_global = st.session_state.get("df")
 if not isinstance(df_global, pd.DataFrame):
     st.error("Please load a dataset to continue."); st.stop()
 
 df_global = tidy_column_names(df_global)
-if "brand" not in df_global.columns: df_global = infer_brand_from_model(df_global)
+if "brand" not in df_global.columns:
+    df_global = infer_brand_from_model(df_global)
 
 required_now = ["brand","model","year","mileage","engineSize"]
 missing = [c for c in required_now if c not in df_global.columns]
-if missing: st.error(f"Missing required columns after mapping: {missing}."); st.stop()
+if missing:
+    st.error(f"Missing required columns after mapping: {missing}."); st.stop()
 
 df_sel = df_global.dropna(subset=["brand","model","engineSize"]).copy()
 df_sel["brand"] = df_sel["brand"].astype(str).str.strip()
 df_sel["model"] = df_sel["model"].astype(str).str.strip()
 
+# =============== Inputs (Brand→Model→Engine Size) ===============
 st.subheader("📝 Inputs")
 st.markdown("**Vehicle Identification**")
+
 brands = sorted([b for b in df_sel["brand"].unique().tolist() if b and b.lower()!="nan"])
 if not brands: st.error("No brands determined."); st.stop()
 brand_val = st.selectbox("Brand", options=brands, index=0, key="brand_sel")
@@ -241,11 +307,13 @@ with c2:
     mpg_opt = st.number_input("Miles per gallon (MPG)", min_value=0.0, max_value=200.0, value=0.0, step=0.1, help="MPG = Miles per gallon")
 
 mpg_val = None if mpg_opt == 0.0 else mpg_opt
-tax_val = None  # <<— UI kaldırıldı; model NaN ile çalışır (imputer)
+tax_val = None  # no UI; optional in model
 
+# Suggested KM window + OOD
 suggested_km = suggest_mileage_range(df_sel, brand_val, model_name, year)
 ood_warning_for_mileage(mileage, suggested_km)
 
+# =============== Predict ===============
 if st.button("💡 Predict Price", use_container_width=True):
     if pipe_mid is None:
         st.error("Mid pipeline is not loaded.")
@@ -322,55 +390,3 @@ st.markdown("""
 - *MPG = Miles per gallon.*
 - Based on historical data from vehicles registered in the United Kingdom between 2000 and 2020.
 """)
-
-
-# file: .streamlit/config.toml
-[theme]
-base = "dark"                              # dark mode
-primaryColor = "#22d3ee"                   # vurgu (buton/aktif)
-backgroundColor = "#0b1220"                # ana arka plan (çok koyu lacivert)
-secondaryBackgroundColor = "#111827"       # kart/sidebar yüzeyi
-textColor = "#e5e7eb"                      # metin
-font = "sans serif"
-# file: streamlit_app.py
-# NOTE: Bu sadece TEMA EKİ; asıl uygulama kodunun en başında st.set_page_config'ten sonra ekleyin.
-
-import streamlit as st
-
-# Optional fine-tuning for dark theme surfaces (uygulamanın geneline küçük rötuş)
-CUSTOM_CSS = """
-<style>
-/* Ana yüzey ve container */
-[data-testid="stAppViewContainer"] { background: #0b1220; }
-.block-container { padding-top: 1.2rem; }
-
-/* Sidebar yüzeyi */
-[data-testid="stSidebar"] { background: #111827; }
-
-/* Tab alt çizgi yumuşatma */
-.stTabs [data-baseweb="tab-list"] {
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-
-/* Dataframe tablo kenarlıkları */
-[data-testid="stTable"] table {
-  border-collapse: separate;
-  border-spacing: 0;
-}
-[data-testid="stTable"] thead tr th {
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-[data-testid="stTable"] tbody tr td {
-  border-top: 1px solid rgba(255,255,255,0.04);
-}
-
-/* Uyarı/başarı kutuları köşe yumuşatma */
-.stAlert, .stSuccess, .stWarning, .stInfo {
-  border-radius: 12px;
-}
-</style>
-"""
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
-
-
