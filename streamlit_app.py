@@ -322,3 +322,55 @@ st.markdown("""
 - *MPG = Miles per gallon.*
 - Based on historical data from vehicles registered in the United Kingdom between 2000 and 2020.
 """)
+
+
+# file: .streamlit/config.toml
+[theme]
+base = "dark"                              # dark mode
+primaryColor = "#22d3ee"                   # vurgu (buton/aktif)
+backgroundColor = "#0b1220"                # ana arka plan (çok koyu lacivert)
+secondaryBackgroundColor = "#111827"       # kart/sidebar yüzeyi
+textColor = "#e5e7eb"                      # metin
+font = "sans serif"
+# file: streamlit_app.py
+# NOTE: Bu sadece TEMA EKİ; asıl uygulama kodunun en başında st.set_page_config'ten sonra ekleyin.
+
+import streamlit as st
+
+# Optional fine-tuning for dark theme surfaces (uygulamanın geneline küçük rötuş)
+CUSTOM_CSS = """
+<style>
+/* Ana yüzey ve container */
+[data-testid="stAppViewContainer"] { background: #0b1220; }
+.block-container { padding-top: 1.2rem; }
+
+/* Sidebar yüzeyi */
+[data-testid="stSidebar"] { background: #111827; }
+
+/* Tab alt çizgi yumuşatma */
+.stTabs [data-baseweb="tab-list"] {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Dataframe tablo kenarlıkları */
+[data-testid="stTable"] table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+[data-testid="stTable"] thead tr th {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+[data-testid="stTable"] tbody tr td {
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* Uyarı/başarı kutuları köşe yumuşatma */
+.stAlert, .stSuccess, .stWarning, .stInfo {
+  border-radius: 12px;
+}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+
