@@ -244,11 +244,11 @@ def suggest_mileage_range(df: Optional[pd.DataFrame], brand: Optional[str], mode
     hi = int(max(lo + 1_000, round(q90 * (vehicle_age + 1), -3)))
     return (lo, hi)
 
-def ood_warning_for_mileage(sel_mileage: float, suggested: Tuple[int,int]) -> None:
-    lo, hi = suggested
-    margin = 0.25 * (hi - lo)
-    if sel_mileage < lo - margin or sel_mileage > hi + margin:
-        st.warning("Mileage seems outside the typical range for this brand/model/year. Predictions may be less reliable.")
+# def ood_warning_for_mileage(sel_mileage: float, suggested: Tuple[int,int]) -> None:
+#    lo, hi = suggested
+#    margin = 0.25 * (hi - lo)
+#    if sel_mileage < lo - margin or sel_mileage > hi + margin:
+#       st.warning("Mileage seems outside the typical range for this brand/model/year. Predictions may be less reliable.")
 
 # ===================== Sidebar: Pipelines =====================
 with st.sidebar:
