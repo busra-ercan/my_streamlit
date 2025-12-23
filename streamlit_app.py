@@ -438,7 +438,7 @@ if st.button("💡 Predict Price", use_container_width=True):
         try:
             mid = predict_mid(pipe_mid, X_one)
             st.success(f"Estimated Price: **£{mid:,.0f}**")
-            k = st.slider("MAE Scale (band width)", 0.5, 2.0, 1.0, 0.1)
+            k=1.0
             mae_band = k * GLOBAL_MAE_GBP
             lower_mae = max(0.0, mid - mae_band); upper_mae = mid + mae_band
             st.info(f"Practical Range: **£{lower_mae:,.0f} – £{upper_mae:,.0f}** (±£{mae_band:,.0f})")
@@ -504,5 +504,5 @@ st.markdown("""
 **Notes**
 - The estimate reflects average behavior learned from historical data.
 
-- Based on historical data from vehicles registered in the United Kingdom between 2000 and 2020.
+- Based on historical data from vehicles registered in the United Kingdom between 1990 and 2020.
 """)
